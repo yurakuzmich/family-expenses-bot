@@ -5,6 +5,9 @@
 #   BOT_ENV (optional) — full .env contents for the verify job
 #   SSH_PRIVATE_KEY, SSH_HOST, SSH_USER, DEPLOY_PATH — deploy (optional SSH_PORT)
 #
+# DEPLOY_PATH: absolute path on the server that SSH_USER can create and write
+#   (e.g. /home/ubuntu/family-expences). Avoid /root, /opt, … without sudo.
+#
 # Server: Docker + Compose plugin; .env on server for BOT_TOKEN, etc.
 
 name: CI
@@ -67,9 +70,10 @@ jobs:
         run: |
           set -e
           PORT="${SSH_PORT:-22}"
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          KNOWN_HOSTS="${RUNNER_TEMP}/gh-deploy-known_hosts"
+          mkdir -p "$(dirname "$KNOWN_HOSTS")"
+          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
+          echo "KNOWN_HOSTS=$KNOWN_HOSTS" >> "$GITHUB_ENV"
 
       - name: Ensure remote directory exists
         env:
@@ -80,7 +84,9 @@ jobs:
         run: |
           set -e
           PORT="${SSH_PORT:-22}"
-          ssh -p "$PORT" -o StrictHostKeyChecking=yes \
+          ssh -p "$PORT" \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" \
+            -o StrictHostKeyChecking=yes \
             "${SSH_USER}@${SSH_HOST}" "mkdir -p '${DEPLOY_PATH}'"
 
       - name: Rsync repository to server
@@ -92,7 +98,7 @@ jobs:
         run: |
           set -e
           PORT="${SSH_PORT:-22}"
-          export RSYNC_RSH="ssh -p $PORT -o StrictHostKeyChecking=yes"
+          export RSYNC_RSH="ssh -p $PORT -o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes"
           rsync -avz --delete \
             --exclude node_modules \
             --exclude dist \
@@ -112,6 +118,8 @@ jobs:
         run: |
           set -e
           PORT="${SSH_PORT:-22}"
-          ssh -p "$PORT" -o StrictHostKeyChecking=yes \
+          ssh -p "$PORT" \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" \
+            -o StrictHostKeyChecking=yes \
             "${SSH_USER}@${SSH_HOST}" \
             "cd '${DEPLOY_PATH}' && docker compose up -d --build"
