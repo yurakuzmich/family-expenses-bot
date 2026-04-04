@@ -76,15 +76,28 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
         run: |
-          set -e
+          set -euo pipefail
+          if [ -z "${SSH_HOST:-}" ]; then
+            echo "::error::SSH_HOST secret is empty."
+            exit 1
+          fi
           PORT="${SSH_PORT:-22}"
           KNOWN_HOSTS="${RUNNER_TEMP}/gh-deploy-known_hosts"
           mkdir -p "$(dirname "$KNOWN_HOSTS")"
           : > "$KNOWN_HOSTS"
-          # Do not use ssh-keyscan -T here: on OpenSSH it is a *hash algorithm*, not a timeout.
-          timeout 90 ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
+          # No ssh-keyscan -T: on OpenSSH that flag is a hash type, not a timeout.
+          set +e
+          timeout 90 ssh-keyscan -p "$PORT" "$SSH_HOST" >> "$KNOWN_HOSTS" 2>ssh-keyscan.err
+          SCAN_RC=$?
+          set -e
+          if [ "$SCAN_RC" -eq 124 ]; then
+            echo "::error::ssh-keyscan timed out after 90s. Host:port=$SSH_HOST:$PORT"
+            cat ssh-keyscan.err || true
+            exit 1
+          fi
           if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
-            echo "::error::ssh-keyscan did not return any keys. Check SSH_HOST, SSH_PORT, and that port $PORT is open to the internet from GitHub Actions."
+            echo "::error::ssh-keyscan produced no host keys (exit $SCAN_RC). Check SSH_HOST, SSH_PORT, firewall, and that sshd is reachable from the public internet."
+            cat ssh-keyscan.err || true
             exit 1
           fi
           echo "KNOWN_HOSTS=$KNOWN_HOSTS" >> "$GITHUB_ENV"
