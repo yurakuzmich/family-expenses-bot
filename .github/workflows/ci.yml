@@ -81,8 +81,8 @@ jobs:
           KNOWN_HOSTS="${RUNNER_TEMP}/gh-deploy-known_hosts"
           mkdir -p "$(dirname "$KNOWN_HOSTS")"
           : > "$KNOWN_HOSTS"
-          # -T 15: wait up to 15s per probe (slow or filtered networks)
-          ssh-keyscan -T 15 -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
+          # Do not use ssh-keyscan -T here: on OpenSSH it is a *hash algorithm*, not a timeout.
+          timeout 90 ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
           if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
             echo "::error::ssh-keyscan did not return any keys. Check SSH_HOST, SSH_PORT, and that port $PORT is open to the internet from GitHub Actions."
             exit 1
