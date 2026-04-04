@@ -1,0 +1,117 @@
+# Verify: lint, test, build (all triggers).
+# Deploy: only on push to main/master or manual workflow_dispatch — runs after verify.
+#
+# Secrets:
+#   BOT_ENV (optional) — full .env contents for the verify job
+#   SSH_PRIVATE_KEY, SSH_HOST, SSH_USER, DEPLOY_PATH — deploy (optional SSH_PORT)
+#
+# Server: Docker + Compose plugin; .env on server for BOT_TOKEN, etc.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from BOT_ENV secret
+        env:
+          BOT_ENV: ${{ secrets.BOT_ENV }}
+        run: printf '%s\n' "$BOT_ENV" > .env
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint:ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Trust server host key
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -e
+          PORT="${SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ensure remote directory exists
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -e
+          PORT="${SSH_PORT:-22}"
+          ssh -p "$PORT" -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" "mkdir -p '${DEPLOY_PATH}'"
+
+      - name: Rsync repository to server
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -e
+          PORT="${SSH_PORT:-22}"
+          export RSYNC_RSH="ssh -p $PORT -o StrictHostKeyChecking=yes"
+          rsync -avz --delete \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude coverage \
+            --exclude .git \
+            --exclude .env \
+            --exclude '.env.*' \
+            --exclude '.cursor' \
+            ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
+
+      - name: Docker Compose up
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -e
+          PORT="${SSH_PORT:-22}"
+          ssh -p "$PORT" -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" \
+            "cd '${DEPLOY_PATH}' && docker compose up -d --build"
