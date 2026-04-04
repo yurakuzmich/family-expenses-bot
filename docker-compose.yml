@@ -1,0 +1,19 @@
+# Compose loads a `.env` file next to this file for ${VAR} substitution (optional).
+# Example: copy .env.example to .env and set BOT_TOKEN.
+#
+# Run: docker compose up --build
+
+services:
+  app:
+    build: .
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      MONGODB_URI: mongodb://mongo:27017/family-expenses
+      APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
+      BOT_TOKEN: ${BOT_TOKEN}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
