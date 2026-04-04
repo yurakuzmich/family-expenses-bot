@@ -15,10 +15,14 @@
 # Optional secret SERVER_ENV: multiline contents written to .env on the server
 #   before docker compose (same keys as local .env).
 #
-# Optional secret SSH_KNOWN_HOSTS: paste output of:
-#   ssh-keyscan -p PORT YOUR_SSH_HOST
-#   (run on any machine that CAN reach the server). Use this if GitHub Actions
-#   cannot connect to your SSH port (firewall, private network, IP allowlist).
+# Optional secret SSH_KNOWN_HOSTS: lines like "HOST ssh-ed25519 AAAA..." (not only
+#   "# ..." comments). If Windows ssh-keyscan prints "unsupported KEX method", the
+#   server uses a key exchange your client does not support — run keyscan on the
+#   server instead, e.g. ssh in then:
+#     ssh-keyscan -t ed25519,rsa,ecdsa -p 22 127.0.0.1
+#   Replace 127.0.0.1 in the output with your public IP or DNS name if ssh checks
+#   a different host string. Or upgrade OpenSSH on Windows / use WSL.
+# Use this secret if GitHub cannot run ssh-keyscan to your host (firewall, etc.).
 
 name: CI
 
