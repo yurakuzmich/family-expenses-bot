@@ -14,6 +14,11 @@
 #
 # Optional secret SERVER_ENV: multiline contents written to .env on the server
 #   before docker compose (same keys as local .env).
+#
+# Optional secret SSH_KNOWN_HOSTS: paste output of:
+#   ssh-keyscan -p PORT YOUR_SSH_HOST
+#   (run on any machine that CAN reach the server). Use this if GitHub Actions
+#   cannot connect to your SSH port (firewall, private network, IP allowlist).
 
 name: CI
 
@@ -69,12 +74,12 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # Fetches the server SSH host key so later ssh/rsync do not prompt (non-interactive CI).
-      # Fails if GitHub cannot reach SSH_HOST:SSH_PORT (firewall, wrong host, closed port).
+      # known_hosts: use secret SSH_KNOWN_HOSTS if GitHub cannot reach your SSH port.
       - name: Trust server host key
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           if [ -z "${SSH_HOST:-}" ]; then
@@ -85,19 +90,37 @@ jobs:
           KNOWN_HOSTS="${RUNNER_TEMP}/gh-deploy-known_hosts"
           mkdir -p "$(dirname "$KNOWN_HOSTS")"
           : > "$KNOWN_HOSTS"
-          # No ssh-keyscan -T: on OpenSSH that flag is a hash type, not a timeout.
-          set +e
-          timeout 90 ssh-keyscan -p "$PORT" "$SSH_HOST" >> "$KNOWN_HOSTS" 2>ssh-keyscan.err
-          SCAN_RC=$?
-          set -e
-          if [ "$SCAN_RC" -eq 124 ]; then
-            echo "::error::ssh-keyscan timed out after 90s. Host:port=$SSH_HOST:$PORT"
-            cat ssh-keyscan.err || true
-            exit 1
+
+          if [ -n "${SSH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > "$KNOWN_HOSTS"
+            echo "Using SSH_KNOWN_HOSTS secret (skipped ssh-keyscan from runner)."
+          else
+            # No ssh-keyscan -T: on OpenSSH that flag is a hash type, not a timeout.
+            set +e
+            timeout 90 ssh-keyscan -4 -t rsa,ecdsa,ed25519 -p "$PORT" "$SSH_HOST" >> "$KNOWN_HOSTS" 2>ssh-keyscan.err
+            SCAN_RC=$?
+            if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
+              : > "$KNOWN_HOSTS"
+              timeout 90 ssh-keyscan -t rsa,ecdsa,ed25519 -p "$PORT" "$SSH_HOST" >> "$KNOWN_HOSTS" 2>>ssh-keyscan.err
+              SCAN_RC=$?
+            fi
+            set -e
+            if [ "$SCAN_RC" -eq 124 ]; then
+              echo "::error::ssh-keyscan timed out after 90s."
+              cat ssh-keyscan.err || true
+              echo "::notice::If your firewall blocks GitHub, add repo secret SSH_KNOWN_HOSTS with: ssh-keyscan -p $PORT $SSH_HOST"
+              exit 1
+            fi
+            if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
+              echo "::error::ssh-keyscan produced no host keys (exit $SCAN_RC). stderr:"
+              cat ssh-keyscan.err || true
+              echo "::notice::Open SSH port to the internet for GitHub Actions, OR add secret SSH_KNOWN_HOSTS — run locally: ssh-keyscan -p $PORT $SSH_HOST"
+              exit 1
+            fi
           fi
+
           if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
-            echo "::error::ssh-keyscan produced no host keys (exit $SCAN_RC). Check SSH_HOST, SSH_PORT, firewall, and that sshd is reachable from the public internet."
-            cat ssh-keyscan.err || true
+            echo "::error::known_hosts file has no key lines."
             exit 1
           fi
           echo "KNOWN_HOSTS=$KNOWN_HOSTS" >> "$GITHUB_ENV"
