@@ -34,7 +34,9 @@ export class FamilyJoinScene {
     }
     if (raw === BTN_CREATE_FAMILY) {
       await ctx.scene.leave();
-      await ctx.reply('Используйте Создать семью из меню, или нажмите еще раз.');
+      await ctx.reply(
+        'Используйте Создать семью из меню, или нажмите еще раз.',
+      );
       return;
     }
     if (!ctx.from) {

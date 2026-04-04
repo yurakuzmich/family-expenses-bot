@@ -82,7 +82,9 @@ export class BotUpdate {
       return;
     }
     if (result === 'USER_NOT_FOUND') {
-      await ctx.reply('Что-то пошло не так... Попробуйте нажать /start еще раз.');
+      await ctx.reply(
+        'Что-то пошло не так... Попробуйте нажать /start еще раз.',
+      );
       return;
     }
     await ctx.reply(
@@ -246,7 +248,10 @@ export class BotUpdate {
       return false;
     }
     if (!user.familyId) {
-      await ctx.reply('Создайте или присоединитесь к семье.', preFamilyKeyboard());
+      await ctx.reply(
+        'Создайте или присоединитесь к семье.',
+        preFamilyKeyboard(),
+      );
       return false;
     }
     return true;

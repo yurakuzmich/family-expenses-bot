@@ -2,6 +2,12 @@ import { Injectable } from '@nestjs/common';
 
 export type ParsedExpense = { expenseName: string; amount: number };
 
+export type ParseLinesResult = {
+  items: ParsedExpense[];
+  /** Non-empty lines that did not parse (trimmed text). */
+  invalidLines: string[];
+};
+
 @Injectable()
 export class ExpenseParserService {
   /**
@@ -25,5 +31,27 @@ export class ExpenseParserService {
       return null;
     }
     return { expenseName, amount };
+  }
+
+  /**
+   * One expense per non-empty line; same format as {@link parse}.
+   */
+  parseLines(text: string): ParseLinesResult {
+    const lines = text.split(/\r?\n/u);
+    const items: ParsedExpense[] = [];
+    const invalidLines: string[] = [];
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) {
+        continue;
+      }
+      const p = this.parse(t);
+      if (p) {
+        items.push(p);
+      } else {
+        invalidLines.push(t);
+      }
+    }
+    return { items, invalidLines };
   }
 }

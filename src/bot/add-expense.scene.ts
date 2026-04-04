@@ -19,7 +19,17 @@ export class AddExpenseScene {
   @SceneEnter()
   async enter(@Ctx() ctx: BotContext) {
     await ctx.reply(
-      'Добавь расход в формате:\n\"Название цена\"\nНапример: Сосиски 45000',
+      [
+        'Добавь расход(ы). Каждая строка — отдельный расход:',
+        '«Название сумма»',
+        '',
+        'Пример одной строки: Сосиски 45000',
+        '',
+        'Или несколько строк:',
+        'Хлеб 10000',
+        'Молоко 14000',
+        'Спички 1200',
+      ].join('\n'),
       mainMenuKeyboard(),
     );
   }
@@ -32,7 +42,7 @@ export class AddExpenseScene {
     }
     if (raw === BTN_ADD_EXPENSE) {
       await ctx.reply(
-        'You are already adding an expense. Send the line with the amount at the end.',
+        'Ты уже в режиме добавления. Пришли строку(и) с суммой в конце каждой.',
       );
       return;
     }
@@ -57,25 +67,41 @@ export class AddExpenseScene {
       return;
     }
 
-    const parsed = this.parser.parse(raw);
-    if (!parsed) {
+    const { items, invalidLines } = this.parser.parseLines(raw);
+    if (items.length === 0) {
       await ctx.reply(
-        'Could not parse. Send text ending with a positive number, e.g. "Groceries 2500".',
+        [
+          'Не удалось разобрать ни одной строки.',
+          'Формат: название, пробел, положительное число в конце строки.',
+          'Пример: Хлеб 10000',
+        ].join('\n'),
       );
       return;
     }
 
-    await this.expensesService.create(
-      user._id,
-      user.name,
-      parsed.expenseName,
-      parsed.amount,
-      user.familyId,
-    );
+    for (const item of items) {
+      await this.expensesService.create(
+        user._id,
+        user.name,
+        item.expenseName,
+        item.amount,
+        user.familyId,
+      );
+    }
+
+    const savedLines = items.map((i) => `• ${i.expenseName} — ${i.amount}`);
+    const total = items.reduce((sum, i) => sum + i.amount, 0);
+    let reply = [`Сохранено ${items.length}:`, ...savedLines].join('\n');
+    if (invalidLines.length > 0) {
+      reply += [
+        '',
+        `Пропущено (${invalidLines.length}), неверный формат:`,
+        ...invalidLines.map((l) => `• ${l}`),
+      ].join('\n');
+    }
+    reply += `\n\nВсего: ${total}`;
+
     await ctx.scene.leave();
-    await ctx.reply(
-      `Saved: ${parsed.expenseName} — ${parsed.amount}`,
-      mainMenuKeyboard(),
-    );
+    await ctx.reply(reply, mainMenuKeyboard());
   }
 }

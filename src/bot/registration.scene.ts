@@ -11,9 +11,12 @@ export class RegistrationScene {
 
   @SceneEnter()
   async enter(@Ctx() ctx: BotContext) {
-    await ctx.reply('Как вас зовут? (должно быть уникальным среди всех пользователей бота)', {
-      reply_markup: { remove_keyboard: true },
-    });
+    await ctx.reply(
+      'Как вас зовут? (должно быть уникальным среди всех пользователей бота)',
+      {
+        reply_markup: { remove_keyboard: true },
+      },
+    );
   }
 
   @On('text')
