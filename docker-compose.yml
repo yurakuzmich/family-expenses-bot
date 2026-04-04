@@ -1,16 +1,19 @@
-# Compose loads a `.env` file next to this file for ${VAR} substitution (optional).
-# Example: copy .env.example to .env and set BOT_TOKEN.
+# Keep a `.env` next to this file. `env_file` injects into the app container
+# (BOT_TOKEN, MONGODB_URI, APP_TIMEZONE, HOST_PORT, …). Do not override those
+# here, or they will beat `.env`.
+#
+# `HOST_PORT` / `APP_TIMEZONE` below use Compose substitution from the same `.env`
+# when present.
 #
 # Run: docker compose up --build
 
 services:
   app:
     build: .
+    env_file:
+      - .env
     ports:
       - "${HOST_PORT:-3000}:3000"
     environment:
       PORT: 3000
-      MONGODB_URI: mongodb://mongo:27017/family-expenses
-      APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
-      BOT_TOKEN: ${BOT_TOKEN}
     restart: unless-stopped

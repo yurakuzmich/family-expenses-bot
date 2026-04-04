@@ -8,7 +8,12 @@
 # DEPLOY_PATH: absolute path on the server that SSH_USER can create and write
 #   (e.g. /home/ubuntu/family-expences). Avoid /root, /opt, … without sudo.
 #
-# Server: Docker + Compose plugin; .env on server for BOT_TOKEN, etc.
+# Server: Docker + Compose plugin. Create DEPLOY_PATH/.env on the server with at
+#   least BOT_TOKEN=… (rsync does not upload .env). Otherwise Compose warns and
+#   the bot has no token.
+#
+# Optional secret SERVER_ENV: multiline contents written to .env on the server
+#   before docker compose (same keys as local .env).
 
 name: CI
 
@@ -56,6 +61,7 @@ jobs:
     needs: verify
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -87,6 +93,8 @@ jobs:
           ssh -p "$PORT" \
             -o UserKnownHostsFile="$KNOWN_HOSTS" \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
             "${SSH_USER}@${SSH_HOST}" "mkdir -p '${DEPLOY_PATH}'"
 
       - name: Rsync repository to server
@@ -98,7 +106,7 @@ jobs:
         run: |
           set -e
           PORT="${SSH_PORT:-22}"
-          export RSYNC_RSH="ssh -p $PORT -o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes"
+          export RSYNC_RSH="ssh -p $PORT -o UserKnownHostsFile=$KNOWN_HOSTS -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=120"
           rsync -avz --delete \
             --exclude node_modules \
             --exclude dist \
@@ -108,6 +116,28 @@ jobs:
             --exclude '.env.*' \
             --exclude '.cursor' \
             ./ "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/"
+
+      - name: Write server .env from SERVER_ENV secret
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          SERVER_ENV: ${{ secrets.SERVER_ENV }}
+        run: |
+          set -e
+          if [ -z "$SERVER_ENV" ]; then
+            echo "SERVER_ENV secret empty — using existing .env on server (create it manually if needed)."
+            exit 0
+          fi
+          PORT="${SSH_PORT:-22}"
+          printf '%s\n' "$SERVER_ENV" | ssh -p "$PORT" \
+            -o UserKnownHostsFile="$KNOWN_HOSTS" \
+            -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "${SSH_USER}@${SSH_HOST}" \
+            "cat > '${DEPLOY_PATH}/.env' && chmod 600 '${DEPLOY_PATH}/.env'"
 
       - name: Docker Compose up
         env:
@@ -121,5 +151,7 @@ jobs:
           ssh -p "$PORT" \
             -o UserKnownHostsFile="$KNOWN_HOSTS" \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
             "${SSH_USER}@${SSH_HOST}" \
             "cd '${DEPLOY_PATH}' && docker compose up -d --build"
