@@ -69,6 +69,8 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      # Fetches the server SSH host key so later ssh/rsync do not prompt (non-interactive CI).
+      # Fails if GitHub cannot reach SSH_HOST:SSH_PORT (firewall, wrong host, closed port).
       - name: Trust server host key
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -78,7 +80,13 @@ jobs:
           PORT="${SSH_PORT:-22}"
           KNOWN_HOSTS="${RUNNER_TEMP}/gh-deploy-known_hosts"
           mkdir -p "$(dirname "$KNOWN_HOSTS")"
-          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
+          : > "$KNOWN_HOSTS"
+          # -T 15: wait up to 15s per probe (slow or filtered networks)
+          ssh-keyscan -T 15 -p "$PORT" -H "$SSH_HOST" >> "$KNOWN_HOSTS"
+          if ! grep -qE '^[^#[:space:]]' "$KNOWN_HOSTS"; then
+            echo "::error::ssh-keyscan did not return any keys. Check SSH_HOST, SSH_PORT, and that port $PORT is open to the internet from GitHub Actions."
+            exit 1
+          fi
           echo "KNOWN_HOSTS=$KNOWN_HOSTS" >> "$GITHUB_ENV"
 
       - name: Ensure remote directory exists
